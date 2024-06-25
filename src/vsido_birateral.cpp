@@ -25,7 +25,7 @@ VSidoBirateral::VSidoBirateral(ros::NodeHandle *node_handle, boost::asio::io_ser
   init_timers();
 
   doReceive();
-  // sendSerialCmd('3');
+  sendSerialCmd('3');
   sendSerialCmd('s');
 
   //  robot_wait_for_joint_states();
@@ -44,21 +44,17 @@ VSidoBirateral::~VSidoBirateral()
 
 bool VSidoBirateral::init_model(void)
 {
-  ros::NodeHandle pnh("~");
-  pnh.getParam("port", port_name);
-  pnh.getParam("baudrate", baudrate);
-  pnh.getParam("side_name", side_name);
+  node.getParam("port", port_name);
+  node.getParam("baudrate", baudrate);
+  node.getParam("side_name", side_name);
 
   ROS_INFO_STREAM("side_name: "<< side_name);
 
   master_robot_name="master_"+side_name;
   puppet_robot_name="puppet_"+side_name;  
-
-  js_master_topic=master_robot_name+"/joint_state";
-  js_puppet_topic=puppet_robot_name+"/joint_state";
-
-  ROS_INFO_STREAM("js_master_topic : "<< js_master_topic);
-  ROS_INFO_STREAM("js_puppet_topic : "<< js_puppet_topic);  
+  
+  master_get_motor_configs();
+  puppet_get_motor_configs();  
 
   joint_names = std::vector<std::string>{
       "waist",
@@ -81,10 +77,12 @@ bool VSidoBirateral::init_model(void)
   js_index = 6;
   horn_radius = 0.0275;
   arm_length = 0.035;
-  left_finger = "left finger";
-  right_finger = "right finger";
+  left_finger = "left_finger";
+  right_finger = "right_finger";
 
   position_vec.resize(joint_num, 0);
+
+  //yamlファイルの読み込み
 
   return true;
 }
@@ -143,9 +141,15 @@ bool VSidoBirateral::init_port(void)
 /// @brief Initialize ROS Publishers
 void VSidoBirateral::init_publishers(void)
 {
+  std::string puppet_node_name="/puppet_"+side_name;
+  std::string master_node_name="/master_"+side_name;  
+
+  ros::NodeHandle master_nh(master_node_name);
+  ros::NodeHandle puppet_nh(puppet_node_name);
+
   // masterとpuppetのtopicをpublishする
-  pub_master_joint_states = node.advertise<sensor_msgs::JointState>(js_master_topic, 1);
-  pub_puppet_joint_states = node.advertise<sensor_msgs::JointState>(js_puppet_topic, 1);
+  pub_master_joint_states = master_nh.advertise<sensor_msgs::JointState>(js_topic, 1);
+  pub_puppet_joint_states = puppet_nh.advertise<sensor_msgs::JointState>(js_topic, 1);
 }
 
 /// @brief Initialize ROS Subscribers
@@ -157,8 +161,34 @@ void VSidoBirateral::init_subscribers(void)
 /// @brief Initialize ROS Services
 void VSidoBirateral::init_services(void)
 {
+  std::string puppet_node_name="/puppet_"+side_name;
+  std::string master_node_name="/master_"+side_name;  
+
+  ros::NodeHandle master_nh(master_node_name);
+  ros::NodeHandle puppet_nh(puppet_node_name);
+
+  srv_master_set_operating_modes = master_nh.advertiseService("set_operating_modes", &VSidoBirateral::robot_srv_set_operating_modes, this);
+  srv_puppet_set_operating_modes = puppet_nh.advertiseService("set_operating_modes", &VSidoBirateral::robot_srv_set_operating_modes, this);
+
+  srv_master_set_motor_pid_gains = master_nh.advertiseService("set_motor_pid_gains", &VSidoBirateral::robot_srv_set_motor_pid_gains, this);
+  srv_puppet_set_motor_pid_gains = puppet_nh.advertiseService("set_motor_pid_gains", &VSidoBirateral::robot_srv_set_motor_pid_gains, this);
+
+  srv_master_set_motor_registers = master_nh.advertiseService("set_motor_registers", &VSidoBirateral::robot_srv_set_motor_registers, this);
+  srv_puppet_set_motor_registers = puppet_nh.advertiseService("set_motor_registers", &VSidoBirateral::robot_srv_set_motor_registers, this);
+
+  srv_master_get_motor_registers = master_nh.advertiseService("get_motor_registers", &VSidoBirateral::robot_srv_get_motor_registers, this);
+  srv_puppet_get_motor_registers = puppet_nh.advertiseService("get_motor_registers", &VSidoBirateral::robot_srv_get_motor_registers, this);
+
+  // alohaのcodeでモデル情報が必要
+  srv_master_get_robot_info = master_nh.advertiseService("get_robot_info", &VSidoBirateral::master_srv_get_robot_info, this);
+  srv_puppet_get_robot_info = puppet_nh.advertiseService("get_robot_info", &VSidoBirateral::puppet_srv_get_robot_info, this);
+
   // record_episode.pyのopening_ceremony内にて、エンドエフェクタのトルクOFFをしているため、バイラテラル開始のトリガーとして利用。
-  srv_torque_enable = node.advertiseService("torque_enable", &VSidoBirateral::robot_srv_torque_enable, this);
+  srv_master_torque_enable = master_nh.advertiseService("torque_enable", &VSidoBirateral::master_srv_torque_enable, this);//ここだけ例外
+  srv_puppet_torque_enable = puppet_nh.advertiseService("torque_enable", &VSidoBirateral::robot_srv_torque_enable, this);  
+ 
+  srv_master_reboot_motors = master_nh.advertiseService("reboot_motors", &VSidoBirateral::robot_srv_reboot_motors, this);
+  srv_puppet_reboot_motors = puppet_nh.advertiseService("reboot_motors", &VSidoBirateral::robot_srv_reboot_motors, this);  
 }
 
 /// @brief Initialize ROS Timers
@@ -340,7 +370,7 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
   doReceive();
 }
 
-bool VSidoBirateral::robot_srv_torque_enable(interbotix_xs_msgs::TorqueEnable::Request &req, interbotix_xs_msgs::TorqueEnable::Response &res)
+bool VSidoBirateral::master_srv_torque_enable(interbotix_xs_msgs::TorqueEnable::Request &req, interbotix_xs_msgs::TorqueEnable::Response &res)
 {
   // responseは使っていない
 
@@ -349,6 +379,526 @@ bool VSidoBirateral::robot_srv_torque_enable(interbotix_xs_msgs::TorqueEnable::R
   if (req.cmd_type == "single" && req.name == "gripper" && req.enable == false)
   {
     sendSerialCmd('3');
+  }
+
+  return true;
+}
+
+bool VSidoBirateral::master_get_motor_configs(void)
+{
+  std::vector<MotorInfo> motor_info_vec;
+  std::vector<std::string> gripper_order;
+  std::unordered_map<std::string, const ControlItem*> control_items;
+  std::unordered_map<std::string, float> sleep_map;
+  std::unordered_map<std::string, JointGroup> group_map;
+  std::unordered_map<std::string, MotorState> motor_map;
+  std::unordered_map<std::string, std::vector<std::string>> shadow_map;
+  std::unordered_map<std::string, std::vector<std::string>> sister_map;
+  std::unordered_map<std::string, Gripper> gripper_map;
+  std::unordered_map<std::string, size_t> js_index_map;
+
+  std::string motor_configs_file, mode_configs_file;
+  node.getParam("master_motor_configs", motor_configs_file);
+
+  ROS_INFO_STREAM("motor_configs_file: "<< motor_configs_file);
+
+  try
+  {
+    motor_configs = YAML::LoadFile(motor_configs_file.c_str());
+  }
+  catch (YAML::BadFile &error)
+  {
+    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL("[xs_sdk] YAML Error: '%s'", error.what());
+    return false;
+  }
+  if (motor_configs.IsNull())
+  {
+    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
+    return false;
+  }
+
+  node.getParam("master_mode_configs", mode_configs_file);
+  try
+  {
+    mode_configs = YAML::LoadFile(mode_configs_file.c_str());
+    ROS_INFO("[xs_sdk] Loaded mode configs from '%s'.", mode_configs_file.c_str());
+  }
+  catch (YAML::BadFile &error)
+  {
+    ROS_ERROR("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
+    ROS_ERROR("[xs_sdk] YAML Error: '%s'", error.what());
+    return false;
+  }
+  if (mode_configs.IsNull())
+    ROS_INFO("[xs_sdk] Mode Config file is empty. Will use defaults.");
+
+/*
+  port = motor_configs["port"].as<std::string>(PORT);
+  if (mode_configs["port"])
+    port = mode_configs["port"].as<std::string>(PORT);
+    */
+
+  YAML::Node all_motors = motor_configs["motors"];
+  for (YAML::const_iterator motor_itr = all_motors.begin(); motor_itr != all_motors.end(); motor_itr++)
+  {
+    std::string motor_name = motor_itr->first.as<std::string>();
+    YAML::Node single_motor = all_motors[motor_name];
+    uint8_t id = (uint8_t)single_motor["ID"].as<int32_t>();
+    motor_map.insert({motor_name, {id, "position", "velocity"}});
+    for (YAML::const_iterator info_itr = single_motor.begin(); info_itr != single_motor.end(); info_itr++)
+    {
+      std::string reg = info_itr->first.as<std::string>();
+      if (reg != "ID" && reg != "Baud_Rate")
+      {
+        int32_t value = info_itr->second.as<int32_t>();
+        MotorInfo motor_info = {id, reg, value};
+        motor_info_vec.push_back(motor_info);
+      }
+    }
+  }
+
+  YAML::Node all_grippers = motor_configs["grippers"];
+  for (YAML::const_iterator gripper_itr = all_grippers.begin(); gripper_itr != all_grippers.end(); gripper_itr++)
+  {
+    std::string gripper_name = gripper_itr->first.as<std::string>();
+    YAML::Node single_gripper = all_grippers[gripper_name];
+    Gripper gripper;
+    gripper.horn_radius = single_gripper["horn_radius"].as<float>(0.014);
+    gripper.arm_length = single_gripper["arm_length"].as<float>(0.024);
+    gripper.left_finger = single_gripper["left_finger"].as<std::string>("left_finger");
+    gripper.right_finger = single_gripper["right_finger"].as<std::string>("right_finger");
+    gripper_map.insert({gripper_name, gripper});
+  }
+
+  YAML::Node joint_order = motor_configs["joint_order"];
+  YAML::Node sleep_positions = motor_configs["sleep_positions"];
+
+  if (joint_order.size() != sleep_positions.size())
+  {
+    ROS_FATAL(
+      "[xs_sdk] Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
+      joint_order.size(), sleep_positions.size());
+    return false;
+  }
+
+  JointGroup all_joints;
+  all_joints.joint_num = (uint8_t) joint_order.size();
+  all_joints.mode = "position";
+  all_joints.profile_type = "velocity";
+  for (size_t i{0}; i < joint_order.size(); i++)
+  {
+    std::string joint_name = joint_order[i].as<std::string>();
+    all_joints.joint_names.push_back(joint_name);
+    all_joints.joint_ids.push_back(motor_map[joint_name].motor_id);
+    js_index_map.insert({joint_name, i});
+    shadow_map.insert({joint_name, {joint_name}});
+    sister_map.insert({joint_name, {joint_name}});
+    sleep_map.insert({joint_name, sleep_positions[i].as<float>(0)});
+    if (gripper_map.count(joint_name) > 0)
+    {
+      gripper_map[joint_name].js_index = i;
+      gripper_order.push_back(joint_name);
+    }
+  }
+
+  for (auto const& name : gripper_order)
+  {
+    js_index_map.insert({gripper_map[name].left_finger, js_index_map.size()});
+    js_index_map.insert({gripper_map[name].right_finger, js_index_map.size()});
+  }
+
+  group_map.insert({"all", all_joints});
+  //all_ptr = &group_map["all"];
+
+  YAML::Node all_shadows = motor_configs["shadows"];
+  for (YAML::const_iterator master_itr = all_shadows.begin(); master_itr != all_shadows.end(); master_itr++)
+  {
+    std::string master_name = master_itr->first.as<std::string>();
+    YAML::Node master = all_shadows[master_name];
+    YAML::Node shadow_list = master["shadow_list"];
+    for (size_t i{0}; i < shadow_list.size(); i++)
+      shadow_map[master_name].push_back(shadow_list[i].as<std::string>());
+  }
+
+  YAML::Node all_sisters = motor_configs["sisters"];
+  for (YAML::const_iterator sister_itr = all_sisters.begin(); sister_itr != all_sisters.end(); sister_itr++)
+  {
+    std::string sister_one = sister_itr->first.as<std::string>();
+    std::string sister_two = sister_itr->second.as<std::string>();
+    sister_map[sister_one].push_back(sister_two);
+    sister_map[sister_two].push_back(sister_one);
+  }
+
+  YAML::Node all_groups = motor_configs["groups"];
+  for (YAML::const_iterator group_itr = all_groups.begin(); group_itr != all_groups.end(); group_itr++)
+  {
+    std::string name = group_itr->first.as<std::string>();
+    YAML::Node joint_list = all_groups[name];
+    JointGroup group;
+    group.joint_num = (uint8_t) joint_list.size();
+    for (size_t i{0}; i < joint_list.size(); i++)
+    {
+      std::string joint_name = joint_list[i].as<std::string>();
+      group.joint_names.push_back(joint_name);
+      group.joint_ids.push_back(motor_map[joint_name].motor_id);
+    }
+    group_map.insert({name, group});
+  }
+
+  /*
+  YAML::Node pub_configs = motor_configs["joint_state_publisher"];
+  timer_hz = pub_configs["update_rate"].as<int>(100);
+  pub_states = pub_configs["publish_states"].as<bool>(true);
+  js_topic = pub_configs["topic_name"].as<std::string>("joint_states");
+  */
+
+  master_yaml_configs.motor_info_vec=motor_info_vec;
+  master_yaml_configs.gripper_order=gripper_order;
+  master_yaml_configs.control_items=control_items;
+  master_yaml_configs.sleep_map=sleep_map;
+  master_yaml_configs.group_map=group_map;
+  master_yaml_configs.motor_map=motor_map;
+  master_yaml_configs.shadow_map=shadow_map;
+  master_yaml_configs.sister_map=sister_map;
+  master_yaml_configs.gripper_map=gripper_map;
+  master_yaml_configs.js_index_map=js_index_map;
+  
+  ROS_INFO("Loaded motor configs from '%s'.", motor_configs_file.c_str());
+  return true;
+}
+
+bool VSidoBirateral::puppet_get_motor_configs(void)
+{
+  std::vector<MotorInfo> motor_info_vec;
+  std::vector<std::string> gripper_order;
+  std::unordered_map<std::string, const ControlItem*> control_items;
+  std::unordered_map<std::string, float> sleep_map;
+  std::unordered_map<std::string, JointGroup> group_map;
+  std::unordered_map<std::string, MotorState> motor_map;
+  std::unordered_map<std::string, std::vector<std::string>> shadow_map;
+  std::unordered_map<std::string, std::vector<std::string>> sister_map;
+  std::unordered_map<std::string, Gripper> gripper_map;
+  std::unordered_map<std::string, size_t> js_index_map;
+
+  std::string motor_configs_file, mode_configs_file;
+  node.getParam("puppet_motor_configs", motor_configs_file);
+
+  try
+  {
+    motor_configs = YAML::LoadFile(motor_configs_file.c_str());
+  }
+  catch (YAML::BadFile &error)
+  {
+    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL("[xs_sdk] YAML Error: '%s'", error.what());
+    return false;
+  }
+  if (motor_configs.IsNull())
+  {
+    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
+    return false;
+  }
+
+  node.getParam("puppet_mode_configs", mode_configs_file);
+  try
+  {
+    mode_configs = YAML::LoadFile(mode_configs_file.c_str());
+    ROS_INFO("[xs_sdk] Loaded mode configs from '%s'.", mode_configs_file.c_str());
+  }
+  catch (YAML::BadFile &error)
+  {
+    ROS_ERROR("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
+    ROS_ERROR("[xs_sdk] YAML Error: '%s'", error.what());
+    return false;
+  }
+  if (mode_configs.IsNull())
+    ROS_INFO("[xs_sdk] Mode Config file is empty. Will use defaults.");
+
+/*
+  port = motor_configs["port"].as<std::string>(PORT);
+  if (mode_configs["port"])
+    port = mode_configs["port"].as<std::string>(PORT);
+    */
+
+  YAML::Node all_motors = motor_configs["motors"];
+  for (YAML::const_iterator motor_itr = all_motors.begin(); motor_itr != all_motors.end(); motor_itr++)
+  {
+    std::string motor_name = motor_itr->first.as<std::string>();
+    YAML::Node single_motor = all_motors[motor_name];
+    uint8_t id = (uint8_t)single_motor["ID"].as<int32_t>();
+    motor_map.insert({motor_name, {id, "position", "velocity"}});
+    for (YAML::const_iterator info_itr = single_motor.begin(); info_itr != single_motor.end(); info_itr++)
+    {
+      std::string reg = info_itr->first.as<std::string>();
+      if (reg != "ID" && reg != "Baud_Rate")
+      {
+        int32_t value = info_itr->second.as<int32_t>();
+        MotorInfo motor_info = {id, reg, value};
+        motor_info_vec.push_back(motor_info);
+      }
+    }
+  }
+
+  YAML::Node all_grippers = motor_configs["grippers"];
+  for (YAML::const_iterator gripper_itr = all_grippers.begin(); gripper_itr != all_grippers.end(); gripper_itr++)
+  {
+    std::string gripper_name = gripper_itr->first.as<std::string>();
+    YAML::Node single_gripper = all_grippers[gripper_name];
+    Gripper gripper;
+    gripper.horn_radius = single_gripper["horn_radius"].as<float>(0.014);
+    gripper.arm_length = single_gripper["arm_length"].as<float>(0.024);
+    gripper.left_finger = single_gripper["left_finger"].as<std::string>("left_finger");
+    gripper.right_finger = single_gripper["right_finger"].as<std::string>("right_finger");
+    gripper_map.insert({gripper_name, gripper});
+  }
+
+  YAML::Node joint_order = motor_configs["joint_order"];
+  YAML::Node sleep_positions = motor_configs["sleep_positions"];
+
+  if (joint_order.size() != sleep_positions.size())
+  {
+    ROS_FATAL(
+      "[xs_sdk] Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
+      joint_order.size(), sleep_positions.size());
+    return false;
+  }
+
+  JointGroup all_joints;
+  all_joints.joint_num = (uint8_t) joint_order.size();
+  all_joints.mode = "position";
+  all_joints.profile_type = "velocity";
+  for (size_t i{0}; i < joint_order.size(); i++)
+  {
+    std::string joint_name = joint_order[i].as<std::string>();
+    all_joints.joint_names.push_back(joint_name);
+    all_joints.joint_ids.push_back(motor_map[joint_name].motor_id);
+    js_index_map.insert({joint_name, i});
+    shadow_map.insert({joint_name, {joint_name}});
+    sister_map.insert({joint_name, {joint_name}});
+    sleep_map.insert({joint_name, sleep_positions[i].as<float>(0)});
+    if (gripper_map.count(joint_name) > 0)
+    {
+      gripper_map[joint_name].js_index = i;
+      gripper_order.push_back(joint_name);
+    }
+  }
+
+  for (auto const& name : gripper_order)
+  {
+    js_index_map.insert({gripper_map[name].left_finger, js_index_map.size()});
+    js_index_map.insert({gripper_map[name].right_finger, js_index_map.size()});
+  }
+
+  group_map.insert({"all", all_joints});
+  //all_ptr = &group_map["all"];
+
+  YAML::Node all_shadows = motor_configs["shadows"];
+  for (YAML::const_iterator master_itr = all_shadows.begin(); master_itr != all_shadows.end(); master_itr++)
+  {
+    std::string master_name = master_itr->first.as<std::string>();
+    YAML::Node master = all_shadows[master_name];
+    YAML::Node shadow_list = master["shadow_list"];
+    for (size_t i{0}; i < shadow_list.size(); i++)
+      shadow_map[master_name].push_back(shadow_list[i].as<std::string>());
+  }
+
+  YAML::Node all_sisters = motor_configs["sisters"];
+  for (YAML::const_iterator sister_itr = all_sisters.begin(); sister_itr != all_sisters.end(); sister_itr++)
+  {
+    std::string sister_one = sister_itr->first.as<std::string>();
+    std::string sister_two = sister_itr->second.as<std::string>();
+    sister_map[sister_one].push_back(sister_two);
+    sister_map[sister_two].push_back(sister_one);
+  }
+
+  YAML::Node all_groups = motor_configs["groups"];
+  for (YAML::const_iterator group_itr = all_groups.begin(); group_itr != all_groups.end(); group_itr++)
+  {
+    std::string name = group_itr->first.as<std::string>();
+    YAML::Node joint_list = all_groups[name];
+    JointGroup group;
+    group.joint_num = (uint8_t) joint_list.size();
+    for (size_t i{0}; i < joint_list.size(); i++)
+    {
+      std::string joint_name = joint_list[i].as<std::string>();
+      group.joint_names.push_back(joint_name);
+      group.joint_ids.push_back(motor_map[joint_name].motor_id);
+    }
+    group_map.insert({name, group});
+  }
+
+  /*
+  YAML::Node pub_configs = motor_configs["joint_state_publisher"];
+  timer_hz = pub_configs["update_rate"].as<int>(100);
+  pub_states = pub_configs["publish_states"].as<bool>(true);
+  js_topic = pub_configs["topic_name"].as<std::string>("joint_states");
+  */
+
+  puppet_yaml_configs.motor_info_vec=motor_info_vec;
+  puppet_yaml_configs.gripper_order=gripper_order;
+  puppet_yaml_configs.control_items=control_items;
+  puppet_yaml_configs.sleep_map=sleep_map;
+  puppet_yaml_configs.group_map=group_map;
+  puppet_yaml_configs.motor_map=motor_map;
+  puppet_yaml_configs.shadow_map=shadow_map;
+  puppet_yaml_configs.sister_map=sister_map;
+  puppet_yaml_configs.gripper_map=gripper_map;
+  puppet_yaml_configs.js_index_map=js_index_map;
+  
+  ROS_INFO("Loaded motor configs from '%s'.", motor_configs_file.c_str());
+  return true;
+}
+
+bool VSidoBirateral::master_srv_get_robot_info(interbotix_xs_msgs::RobotInfo::Request &req, interbotix_xs_msgs::RobotInfo::Response &res)
+{
+  std::vector<MotorInfo> motor_info_vec=master_yaml_configs.motor_info_vec;
+  std::vector<std::string> gripper_order=master_yaml_configs.gripper_order; 
+  std::unordered_map<std::string, const ControlItem*> control_items=master_yaml_configs.control_items;
+  
+  std::unordered_map<std::string, float> sleep_map=master_yaml_configs.sleep_map;
+  std::unordered_map<std::string, JointGroup> group_map=master_yaml_configs.group_map;
+  std::unordered_map<std::string, MotorState> motor_map=master_yaml_configs.motor_map;
+  std::unordered_map<std::string, std::vector<std::string>> shadow_map=master_yaml_configs.shadow_map;
+  std::unordered_map<std::string, std::vector<std::string>> sister_map=master_yaml_configs.sister_map;
+  std::unordered_map<std::string, Gripper> gripper_map=master_yaml_configs.gripper_map;
+  std::unordered_map<std::string, size_t> js_index_map=master_yaml_configs.js_index_map;                        
+
+  bool urdf_exists = false;
+  urdf::Model model;
+  urdf::JointConstSharedPtr ptr;
+  // Parse the urdf model to get joint limit info
+  
+  std::string robot_name = master_robot_name;
+//  if (ros::param::has("robot_description"))
+  {
+    model.initParam(robot_name + "/robot_description");
+    urdf_exists = true;
+  }  
+
+  if (req.cmd_type == "group")
+  {
+    res.joint_names = group_map[req.name].joint_names;
+    res.profile_type = group_map[req.name].profile_type;
+    res.mode = group_map[req.name].mode;
+  }
+  else if (req.cmd_type == "single")
+  {
+    res.joint_names.push_back(req.name);
+    res.profile_type = motor_map[req.name].profile_type;
+    res.mode = motor_map[req.name].mode;
+  }
+
+  res.num_joints = res.joint_names.size();
+
+  for (auto &name : res.joint_names)
+  {
+    res.joint_ids.push_back(motor_map[name].motor_id);
+    if (gripper_map.count(name) > 0)
+    {
+      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(0));
+      name = gripper_map[name].left_finger;
+    }
+    else
+      res.joint_sleep_positions.push_back(sleep_map[name]);
+    res.joint_state_indices.push_back(js_index_map[name]);
+    if (urdf_exists)
+    {
+      ptr = model.getJoint(name);
+      res.joint_lower_limits.push_back(ptr->limits->lower);
+      res.joint_upper_limits.push_back(ptr->limits->upper);
+      res.joint_velocity_limits.push_back(ptr->limits->velocity);
+    }
+  }
+
+  if (req.name != "all")
+  {
+    res.name.push_back(req.name);
+  }
+  else
+  {
+    for (auto key : group_map)
+    {
+      res.name.push_back(key.first);
+    }
+  }
+
+  return true;
+}
+
+bool VSidoBirateral::puppet_srv_get_robot_info(interbotix_xs_msgs::RobotInfo::Request &req, interbotix_xs_msgs::RobotInfo::Response &res)
+{
+  std::vector<MotorInfo> motor_info_vec=puppet_yaml_configs.motor_info_vec;
+  std::vector<std::string> gripper_order=puppet_yaml_configs.gripper_order; 
+  std::unordered_map<std::string, const ControlItem*> control_items=puppet_yaml_configs.control_items;
+  
+  std::unordered_map<std::string, float> sleep_map=puppet_yaml_configs.sleep_map;
+  std::unordered_map<std::string, JointGroup> group_map=puppet_yaml_configs.group_map;
+  std::unordered_map<std::string, MotorState> motor_map=puppet_yaml_configs.motor_map;
+  std::unordered_map<std::string, std::vector<std::string>> shadow_map=puppet_yaml_configs.shadow_map;
+  std::unordered_map<std::string, std::vector<std::string>> sister_map=puppet_yaml_configs.sister_map;
+  std::unordered_map<std::string, Gripper> gripper_map=puppet_yaml_configs.gripper_map;
+  std::unordered_map<std::string, size_t> js_index_map=puppet_yaml_configs.js_index_map;                        
+
+  bool urdf_exists = false;
+  urdf::Model model;
+  urdf::JointConstSharedPtr ptr;
+
+  ROS_INFO_STREAM("puppet_srv_get_robot_info:"<<req);
+
+  // Parse the urdf model to get joint limit info
+  std::string robot_name = puppet_robot_name;
+  //if (ros::param::has("robot_description"))
+  {
+    model.initParam(robot_name + "/robot_description");
+    urdf_exists = true;
+  }
+
+  if (req.cmd_type == "group")
+  {
+    res.joint_names = group_map[req.name].joint_names;
+    res.profile_type = group_map[req.name].profile_type;
+    res.mode = group_map[req.name].mode;
+  }
+  else if (req.cmd_type == "single")
+  {
+    res.joint_names.push_back(req.name);
+    res.profile_type = motor_map[req.name].profile_type;
+    res.mode = motor_map[req.name].mode;
+  }
+
+  res.num_joints = res.joint_names.size();
+
+  for (auto &name : res.joint_names)
+  {
+    res.joint_ids.push_back(motor_map[name].motor_id);
+    if (gripper_map.count(name) > 0)
+    {
+      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(0));
+      name = gripper_map[name].left_finger;
+    }
+    else
+      res.joint_sleep_positions.push_back(sleep_map[name]);
+    res.joint_state_indices.push_back(js_index_map[name]);
+    if (urdf_exists)
+    {
+      ptr = model.getJoint(name);
+      res.joint_lower_limits.push_back(ptr->limits->lower);
+      res.joint_upper_limits.push_back(ptr->limits->upper);
+      res.joint_velocity_limits.push_back(ptr->limits->velocity);
+    }
+  }
+
+  if (req.name != "all")
+  {
+    res.name.push_back(req.name);
+  }
+  else
+  {
+    for (auto key : group_map)
+    {
+      res.name.push_back(key.first);
+    }
   }
 
   return true;

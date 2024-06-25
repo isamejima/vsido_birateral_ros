@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   control_msgs
   interbotix_xs_msgs
+  interbotix_xs_sdk
 )
 
 ## System dependencies are found with CMake's conventions
