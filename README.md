@@ -1,2 +1,2 @@
 # vsido_birateral_ros
-V-Sido Birateral program for ROS1 
+V-Sido Birateral ros notetic pkg for ALOHA Project

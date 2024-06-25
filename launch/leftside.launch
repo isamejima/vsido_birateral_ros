@@ -1,0 +1,37 @@
+<launch>
+
+  <arg name="type_name"                default="leftside_vsido_birateral"/>
+
+  <arg name="side_name"                default="left"/>
+  <arg name="port_name"                default="/dev/ttyACM0"/>  
+  <arg name="baudrate"                 default="1000000"/>
+  
+  <arg name="robot_name_master_left"	default="master_left"/>
+  <arg name="robot_name_puppet_left"	default="puppet_left"/> 
+
+  <node
+  name="leftside_vsido_birateral"
+  pkg="vsido_birateral_ros"
+  type="vsido_birateral_node"
+  output="screen"
+  >
+  <param name="side_name"                   value="$(arg side_name)"/>
+  <param name="port_name"                   value="$(arg port_name)"/>
+  <param name="baudrate"                    value="$(arg baudrate)"/>
+  </node>
+
+  <!-- 念の為static transform broadcasterを出力 -->
+  
+  <node
+    name="master_left_transform_broadcaster"
+    pkg="tf2_ros"
+    type="static_transform_publisher"
+    args="0 -0.25 0 0 0 0 /world /$(arg robot_name_master_left)/base_link"/>
+
+  <node
+    name="puppet_left_transform_broadcaster"
+    pkg="tf2_ros"
+    type="static_transform_publisher"
+    args="0 0.25 0 0 0 0 /world /$(arg robot_name_puppet_left)/base_link"/>
+
+</launch>
