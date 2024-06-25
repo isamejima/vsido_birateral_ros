@@ -20,18 +20,4 @@
   <param name="baudrate"                    value="$(arg baudrate)"/>
   </node>
 
-  <!-- 念の為static transform broadcasterを出力 -->
-  
-  <node
-    name="master_right_transform_broadcaster"
-    pkg="tf2_ros"
-    type="static_transform_publisher"
-    args="0 -0.25 0 0 0 0 /world /$(arg robot_name_master_right)/base_link"/>
-
-  <node
-    name="puppet_right_transform_broadcaster"
-    pkg="tf2_ros"
-    type="static_transform_publisher"
-    args="0 0.25 0 0 0 0 /world /$(arg robot_name_puppet_right)/base_link"/>
-
 </launch>
