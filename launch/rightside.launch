@@ -1,16 +1,16 @@
 <launch>
 
-  <arg name="type_name"                default="leftside_vsido_birateral"/>
+  <arg name="type_name"                default="rightside_vsido_birateral"/>
 
-  <arg name="side_name"                default="left"/>
-  <arg name="port_name"                default="/dev/ttyACM0"/>  
+  <arg name="side_name"                default="right"/>
+  <arg name="port_name"                default="/dev/ttyACM1"/>  
   <arg name="baudrate"                 default="1000000"/>
   
-  <arg name="robot_name_master_left"	default="master_left"/>
-  <arg name="robot_name_puppet_left"	default="puppet_left"/> 
+  <arg name="robot_name_master_right"	default="master_right"/>
+  <arg name="robot_name_puppet_right"	default="puppet_right"/> 
 
-  <arg name="master_modes"                 default="$(find aloha)/config/master_modes_left.yaml"/>
-  <arg name="puppet_modes"                 default="$(find aloha)/config/puppet_modes_left.yaml"/>
+  <arg name="master_modes"                 default="$(find aloha)/config/master_modes_right.yaml"/>
+  <arg name="puppet_modes"                 default="$(find aloha)/config/puppet_modes_right.yaml"/>
 
   <arg name="robot_model_master"                default="wx250s"/>
   <arg name="robot_model_puppet"                default="vx300s"/>  
@@ -19,7 +19,7 @@
   <arg name="puppet_motor_configs"                default="$(find interbotix_xsarm_control)/config/vx300s.yaml"/>  
 
   <node
-  name="leftside_vsido_birateral"
+  name="rightside_vsido_birateral"
   pkg="vsido_birateral_ros"
   type="vsido_birateral_node"
   output="screen"
@@ -42,7 +42,7 @@
 
   <include file="$(find interbotix_xsarm_descriptions)/launch/xsarm_description.launch">
     <arg name="robot_model"                       value="$(arg robot_model_master)"/>
-    <arg name="robot_name"                        value="$(arg robot_name_master_left)"/>
+    <arg name="robot_name"                        value="$(arg robot_name_master_right)"/>
     <arg name="base_link_frame"                   value="$(arg base_link_frame)"/>
     <arg name="show_ar_tag"                       value="$(arg show_ar_tag)"/>
     <arg name="show_gripper_bar"                  value="$(arg show_gripper_bar)"/>
@@ -54,7 +54,7 @@
 
   <include file="$(find interbotix_xsarm_descriptions)/launch/xsarm_description.launch">
     <arg name="robot_model"                       value="$(arg robot_model_puppet)"/>
-    <arg name="robot_name"                        value="$(arg robot_name_puppet_left)"/>
+    <arg name="robot_name"                        value="$(arg robot_name_puppet_right)"/>
     <arg name="base_link_frame"                   value="$(arg base_link_frame)"/>
     <arg name="show_ar_tag"                       value="$(arg show_ar_tag)"/>
     <arg name="show_gripper_bar"                  value="$(arg show_gripper_bar)"/>
@@ -64,17 +64,15 @@
     <arg name="use_rviz"                          value="false"/>
   </include>
 
+   <node
+    name="master_right_transform_broadcaster"
+    pkg="tf2_ros"
+    type="static_transform_publisher"
+    args="0 -0.25 0 0 0 0 /world /$(arg robot_name_master_right)/base_link"/>
+
   <node
-    name="master_left_transform_broadcaster"
+    name="puppet_right_transform_broadcaster"
     pkg="tf2_ros"
     type="static_transform_publisher"
-    args="0 -0.25 0 0 0 0 /world /$(arg robot_name_master_left)/base_link"/>
-
-      <node
-    name="puppet_left_transform_broadcaster"
-    pkg="tf2_ros"
-    type="static_transform_publisher"
-    args="0 0.25 0 0 0 0 /world /$(arg robot_name_puppet_left)/base_link"/>
-
-
+    args="0 0.25 0 0 0 0 /world /$(arg robot_name_puppet_right)/base_link"/>
 </launch>

@@ -44,10 +44,11 @@ VSidoBirateral::~VSidoBirateral()
 
 bool VSidoBirateral::init_model(void)
 {
-  node.getParam("port", port_name);
+  node.getParam("port_name", port_name);
   node.getParam("baudrate", baudrate);
   node.getParam("side_name", side_name);
 
+  ROS_INFO_STREAM("port_name: "<< port_name);
   ROS_INFO_STREAM("side_name: "<< side_name);
 
   master_robot_name="master_"+side_name;
@@ -55,6 +56,8 @@ bool VSidoBirateral::init_model(void)
   
   master_get_motor_configs();
   puppet_get_motor_configs();  
+
+  joint_num = 7;
 
   joint_names = std::vector<std::string>{
       "waist",
@@ -73,6 +76,7 @@ bool VSidoBirateral::init_model(void)
       "6",
       "7"};
   joint_num = 7;
+
 
   js_index = 6;
   horn_radius = 0.0275;
@@ -210,10 +214,9 @@ void VSidoBirateral::publish_joint_states()
 {
   const char *log;
   sensor_msgs::JointState joint_state_msg;
-  joint_state_msg.name = joint_names;
+
   std::vector<int16_t> p_vec;
   bool flag = false;
-
   {
     std::lock_guard<std::mutex> lock(position_vec_mutex); // 念の為ロックする
     p_vec = position_vec;
@@ -244,8 +247,8 @@ void VSidoBirateral::publish_joint_states()
   }
 
   // グリッパー周りを追加js_indexを参照する
-  joint_state_msg.name.push_back(left_finger.c_str());
-  joint_state_msg.name.push_back(right_finger.c_str());
+  //joint_state_msg.name.push_back(left_finger.c_str());
+  //joint_state_msg.name.push_back(right_finger.c_str());
   float pos = robot_convert_angular_position_to_linear(joint_state_msg.position.at(js_index));
 
   joint_state_msg.position.push_back(pos);
@@ -255,15 +258,26 @@ void VSidoBirateral::publish_joint_states()
   joint_state_msg.effort.push_back(0);   // 電流は使っていないので0埋め
   joint_state_msg.effort.push_back(0);   // 電流は使っていないので0埋め
 
-  // Publish the message to the joint_states topic
-
   joint_state_msg.header.stamp = ros::Time::now();
 
-  master_joint_states = joint_state_msg;
-  puppet_joint_states = joint_state_msg;
+  // Publish the message to the joint_states topic
+  sensor_msgs::JointState master_joint_states_msg=joint_state_msg;
+  sensor_msgs::JointState puppet_joint_states_msg=joint_state_msg;  
 
-  pub_master_joint_states.publish(joint_state_msg);
-  pub_puppet_joint_states.publish(joint_state_msg);
+  joint_state_msg.name = joint_names;
+  joint_state_msg.name.push_back(left_finger.c_str());
+  joint_state_msg.name.push_back(right_finger.c_str());
+
+  master_joint_states_msg.name = master_yaml_configs.group_map["all"].joint_names;
+  master_joint_states_msg.name.push_back(left_finger.c_str());
+  master_joint_states_msg.name.push_back(right_finger.c_str());  
+  
+  puppet_joint_states_msg.name = puppet_yaml_configs.group_map["all"].joint_names;
+  puppet_joint_states_msg.name.push_back(left_finger.c_str());
+  puppet_joint_states_msg.name.push_back(right_finger.c_str());
+
+  pub_master_joint_states.publish(master_joint_states_msg);
+  pub_puppet_joint_states.publish(puppet_joint_states_msg);
 }
 
 /// @brief Waits until first JointState message is received
@@ -376,9 +390,20 @@ bool VSidoBirateral::master_srv_torque_enable(interbotix_xs_msgs::TorqueEnable::
 
   // single joint commandのときだけcmd発行
   // gripperのtorque offのときだけcmd発行
+
+  static bool once_flag=false;
+
   if (req.cmd_type == "single" && req.name == "gripper" && req.enable == false)
   {
+    if(once_flag==false){
     sendSerialCmd('3');
+    once_flag=true;
+    return true;
+    }
+    else {
+      once_flag=false;
+    return true;      
+    }
   }
 
   return true;
