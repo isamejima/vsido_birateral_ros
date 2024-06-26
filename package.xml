@@ -9,7 +9,6 @@
   <!-- The *depend tags are used to specify dependencies -->
   <!-- Dependencies can be catkin packages or system dependencies -->
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>serial</build_depend>
   <build_depend>actionlib</build_depend>
   <build_depend>control_msgs</build_depend>
   <build_depend>dynamixel_workbench_toolbox</build_depend>
@@ -21,7 +20,6 @@
   <build_depend>yaml-cpp</build_depend>
   <build_depend>interbotix_xs_sdk</build_depend>
   <build_export_depend>actionlib</build_export_depend>
-  <build_export_depend>serial</build_export_depend>  
   <build_export_depend>control_msgs</build_export_depend>
   <build_export_depend>dynamixel_workbench_toolbox</build_export_depend>
   <build_export_depend>message_generation</build_export_depend>
