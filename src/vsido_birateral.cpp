@@ -57,8 +57,9 @@ bool VSidoBirateral::init_model(void)
   master_get_motor_configs();
   puppet_get_motor_configs();  
 
-  joint_num = 7;
 
+/*
+  joint_num = 7;
   joint_names = std::vector<std::string>{
       "waist",
       "shoulder",
@@ -75,16 +76,17 @@ bool VSidoBirateral::init_model(void)
       "5",
       "6",
       "7"};
-  joint_num = 7;
+*/
 
-
+/*
   js_index = 6;
   horn_radius = 0.0275;
   arm_length = 0.035;
   left_finger = "left_finger";
   right_finger = "right_finger";
+  */
 
-  position_vec.resize(joint_num, 0);
+  position_vec.resize(7, 0);
 
   //yamlファイルの読み込み
 
@@ -212,9 +214,6 @@ void VSidoBirateral::robot_update_joint_states(const ros::TimerEvent &e)
 /// @brief publishes to the joint_states topic
 void VSidoBirateral::publish_joint_states()
 {
-  const char *log;
-  sensor_msgs::JointState joint_state_msg;
-
   std::vector<int16_t> p_vec;
   bool flag = false;
   {
@@ -229,55 +228,71 @@ void VSidoBirateral::publish_joint_states()
     return;
   }
 
-  // データ長異常でreturn
-  if (p_vec.size() != joint_num)
-    return;
+  sensor_msgs::JointState master_joint_state_msg;
+  sensor_msgs::JointState puppet_joint_state_msg;  
 
-  // 7軸分
-  for (int id = 0; id < p_vec.size(); id++)
+  //masterまわり
+  master_joint_state_msg.name = master_yaml_configs.group_map["all"].joint_names;  
+  //arm
+  for (auto const& name : master_yaml_configs.group_map["all"].joint_names)
   {
     float position = 0;
     float velocity = 0;
     float effort = 0;
 
-    position = robot_convert_angular_position_to_radius(p_vec.at(id));
-    joint_state_msg.position.push_back(position);
-    joint_state_msg.velocity.push_back(0); // 速度は使っていないので0埋め
-    joint_state_msg.effort.push_back(0);   // 電流はつかっていないので0埋め
+    position = robot_convert_angular_position_to_radius(p_vec.at(master_yaml_configs.js_index_map[name]));
+    master_joint_state_msg.position.push_back(position);
+    master_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0埋め
+    master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0埋め
+  }
+  //gripper
+  for (auto const& name : master_yaml_configs.gripper_order)
+  {
+    master_joint_state_msg.name.push_back(master_yaml_configs.gripper_map[name].left_finger.c_str());
+    master_joint_state_msg.name.push_back(master_yaml_configs.gripper_map[name].right_finger.c_str());
+    float pos = robot_convert_angular_position_to_linear(master_yaml_configs.gripper_map[name], master_joint_state_msg.position.at(master_yaml_configs.gripper_map[name].js_index));
+    master_joint_state_msg.position.push_back(pos);
+    master_joint_state_msg.position.push_back(-pos);
+    master_joint_state_msg.velocity.push_back(0);
+    master_joint_state_msg.velocity.push_back(0);
+    master_joint_state_msg.effort.push_back(0);
+    master_joint_state_msg.effort.push_back(0);
   }
 
-  // グリッパー周りを追加js_indexを参照する
-  //joint_state_msg.name.push_back(left_finger.c_str());
-  //joint_state_msg.name.push_back(right_finger.c_str());
-  float pos = robot_convert_angular_position_to_linear(joint_state_msg.position.at(js_index));
+  //puppetまわり
+  puppet_joint_state_msg.name = puppet_yaml_configs.group_map["all"].joint_names;  
+  //arm
+  for (auto const& name : master_yaml_configs.group_map["all"].joint_names)
+  {
+    float position = 0;
+    float velocity = 0;
+    float effort = 0;
 
-  joint_state_msg.position.push_back(pos);
-  joint_state_msg.position.push_back(-pos);
-  joint_state_msg.velocity.push_back(0); // 速度は使っていないので0埋め
-  joint_state_msg.velocity.push_back(0); // 速度は使っていないので0埋め
-  joint_state_msg.effort.push_back(0);   // 電流は使っていないので0埋め
-  joint_state_msg.effort.push_back(0);   // 電流は使っていないので0埋め
+    position = robot_convert_angular_position_to_radius(p_vec.at(master_yaml_configs.js_index_map[name]));
+    puppet_joint_state_msg.position.push_back(position);
+    puppet_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0埋め
+    puppet_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0埋め
+  }
 
-  joint_state_msg.header.stamp = ros::Time::now();
+  for (auto const& name : puppet_yaml_configs.gripper_order)
+  {
+    puppet_joint_state_msg.name.push_back(puppet_yaml_configs.gripper_map[name].left_finger.c_str());
+    puppet_joint_state_msg.name.push_back(puppet_yaml_configs.gripper_map[name].right_finger.c_str());
+    float pos = robot_convert_angular_position_to_linear(puppet_yaml_configs.gripper_map[name], puppet_joint_state_msg.position.at(puppet_yaml_configs.gripper_map[name].js_index));
+    puppet_joint_state_msg.position.push_back(pos);
+    puppet_joint_state_msg.position.push_back(-pos);
+    puppet_joint_state_msg.velocity.push_back(0);
+    puppet_joint_state_msg.velocity.push_back(0);
+    puppet_joint_state_msg.effort.push_back(0);
+    puppet_joint_state_msg.effort.push_back(0);
+  }
 
-  // Publish the message to the joint_states topic
-  sensor_msgs::JointState master_joint_states_msg=joint_state_msg;
-  sensor_msgs::JointState puppet_joint_states_msg=joint_state_msg;  
-
-  joint_state_msg.name = joint_names;
-  joint_state_msg.name.push_back(left_finger.c_str());
-  joint_state_msg.name.push_back(right_finger.c_str());
-
-  master_joint_states_msg.name = master_yaml_configs.group_map["all"].joint_names;
-  master_joint_states_msg.name.push_back(left_finger.c_str());
-  master_joint_states_msg.name.push_back(right_finger.c_str());  
   
-  puppet_joint_states_msg.name = puppet_yaml_configs.group_map["all"].joint_names;
-  puppet_joint_states_msg.name.push_back(left_finger.c_str());
-  puppet_joint_states_msg.name.push_back(right_finger.c_str());
+  master_joint_state_msg.header.stamp = ros::Time::now();
+  puppet_joint_state_msg.header.stamp = master_joint_state_msg.header.stamp;
 
-  pub_master_joint_states.publish(master_joint_states_msg);
-  pub_puppet_joint_states.publish(puppet_joint_states_msg);
+  pub_master_joint_states.publish(master_joint_state_msg);
+  pub_puppet_joint_states.publish(puppet_joint_state_msg);
 }
 
 /// @brief Waits until first JointState message is received
@@ -821,7 +836,7 @@ bool VSidoBirateral::master_srv_get_robot_info(interbotix_xs_msgs::RobotInfo::Re
     res.joint_ids.push_back(motor_map[name].motor_id);
     if (gripper_map.count(name) > 0)
     {
-      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(0));
+      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(gripper_map[name],0));
       name = gripper_map[name].left_finger;
     }
     else
@@ -899,7 +914,7 @@ bool VSidoBirateral::puppet_srv_get_robot_info(interbotix_xs_msgs::RobotInfo::Re
     res.joint_ids.push_back(motor_map[name].motor_id);
     if (gripper_map.count(name) > 0)
     {
-      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(0));
+      res.joint_sleep_positions.push_back(robot_convert_angular_position_to_linear(gripper_map[name],0));
       name = gripper_map[name].left_finger;
     }
     else

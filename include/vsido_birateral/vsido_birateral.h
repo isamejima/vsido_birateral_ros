@@ -84,6 +84,8 @@ private:
   bool pub_states = true; // Boolean that determines if joint states should be published;
 
   bool once_received_flag = false;
+
+  /*
   // pubに必要なデータ類
   std::vector<std::string> joint_names; // Names of all joints
   std::vector<std::string> joint_ids;   // Names of all joints
@@ -93,6 +95,7 @@ private:
   float arm_length;                     // Distance [m] from the edge of the motor horn to a finger
   std::string left_finger;              // Name of the 'left_finger' joint as defined in the URDF (if present)
   std::string right_finger;             // Name of the 'right_finger' joint as defined in the URDF (if present)
+  */
 
   ros::NodeHandle node;                   // ROS Node handle
   ros::NodeHandle master_node;                   // ROS Node handle
@@ -188,15 +191,21 @@ private:
     return rad;
   };
 
-  float robot_convert_linear_position_to_radian(float const &linear_position)
+  float robot_convert_linear_position_to_radian(Gripper const &gripper,float const &linear_position)
   {
-    float half_dist = linear_position / 2.0;
+  float half_dist = linear_position / 2.0;
+  float arm_length = gripper.arm_length;
+  float horn_radius = gripper.horn_radius;
+
     float result = 3.14159 / 2.0 - acos((pow(horn_radius, 2) + pow(half_dist, 2) - pow(arm_length, 2)) / (2 * horn_radius * half_dist));
     return result;
   };
 
-  float robot_convert_angular_position_to_linear(float const &angular_position)
+  float robot_convert_angular_position_to_linear(Gripper const &gripper,float const &angular_position)
   {
+    float arm_length = gripper.arm_length;
+    float horn_radius = gripper.horn_radius;  
+
     float a1 = horn_radius * sin(angular_position);
     float c = sqrt(pow(horn_radius, 2) - pow(a1, 2));
     float a2 = sqrt(pow(arm_length, 2) - pow(c, 2));
