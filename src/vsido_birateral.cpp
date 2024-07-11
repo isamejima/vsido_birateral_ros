@@ -57,38 +57,13 @@ bool VSidoBirateral::init_model(void)
   master_get_motor_configs();
   puppet_get_motor_configs();  
 
+  if(master_yaml_configs.group_map["all"].joint_names.size()!=puppet_yaml_configs.group_map["all"].joint_names.size()){
+    ROS_ERROR("master and puppet joint size is not equal");
+    return false;
+  }
 
-/*
-  joint_num = 7;
-  joint_names = std::vector<std::string>{
-      "waist",
-      "shoulder",
-      "elbow",
-      "forearm_roll",
-      "wrist_angle",
-      "wrist_rotate",
-      "gripper"};
-  joint_ids = std::vector<std::string>{
-      "1",
-      "2",
-      "3",
-      "4",
-      "5",
-      "6",
-      "7"};
-*/
-
-/*
-  js_index = 6;
-  horn_radius = 0.0275;
-  arm_length = 0.035;
-  left_finger = "left_finger";
-  right_finger = "right_finger";
-  */
-
-  position_vec.resize(7, 0);
-
-  //yamlファイルの読み込み
+  //position_vecをリサイズし、ゼロで初期化
+  position_vec.resize(master_yaml_configs.group_map["all"].joint_names.size(), 0);
 
   return true;
 }
@@ -97,20 +72,11 @@ bool VSidoBirateral::init_model(void)
 /// @param <bool> [out] - True if the port was successfully opened; False otherwise
 bool VSidoBirateral::init_port(void)
 {
-
-  /*
-    if (serial_port_ptr)
-    {
-      ROS_INFO("error : port is not opened...");
-      ROS_INFO_STREAM(serial_port_ptr);
-      return false;
-    }
-  */
   serial_port_ptr = boost::shared_ptr<boost::asio::serial_port>(new boost::asio::serial_port(io));
 
   try
   {
-    ROS_INFO_STREAM("serial port open:" << port_name);
+    ROS_INFO_STREAM("try serial port open:" << port_name);
     serial_port_ptr->open(port_name);
   }
   catch (const std::exception &ex)
@@ -129,7 +95,7 @@ bool VSidoBirateral::init_port(void)
   {
     ROS_ERROR_STREAM("Unable to set baud rate :");
     ROS_ERROR_STREAM(ex.what());
-    return -1;
+    return false;
   }
 
   if (serial_port_ptr->is_open())
@@ -137,11 +103,8 @@ bool VSidoBirateral::init_port(void)
     ROS_INFO_STREAM("Serial Port initialized");
     return true;
   }
-
-  else
-  {
-    return false;
-  }
+  
+  return false;
 }
 
 /// @brief Initialize ROS Publishers
@@ -242,8 +205,8 @@ void VSidoBirateral::publish_joint_states()
 
     position = robot_convert_angular_position_to_radius(p_vec.at(master_yaml_configs.js_index_map[name]));
     master_joint_state_msg.position.push_back(position);
-    master_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0埋め
-    master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0埋め
+    master_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0
+    master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0
   }
   //gripper
   for (auto const& name : master_yaml_configs.gripper_order)
@@ -287,9 +250,9 @@ void VSidoBirateral::publish_joint_states()
     puppet_joint_state_msg.effort.push_back(0);
   }
 
-  
-  master_joint_state_msg.header.stamp = ros::Time::now();
-  puppet_joint_state_msg.header.stamp = master_joint_state_msg.header.stamp;
+  ros::Time current_time = ros::Time::now();
+  master_joint_state_msg.header.stamp = current_time;
+  puppet_joint_state_msg.header.stamp = current_time;
 
   pub_master_joint_states.publish(master_joint_state_msg);
   pub_puppet_joint_states.publish(puppet_joint_state_msg);
@@ -306,7 +269,7 @@ bool VSidoBirateral::sendSerialCmd(unsigned char ch)
 
   if (!serial_port_ptr->is_open())
   {
-    ROS_INFO("error : port is not opened...");
+    ROS_INFO("error : port is not open...");
     return false;
   }
 
@@ -334,7 +297,7 @@ void VSidoBirateral::doReceive(void)
   }
 
   // 非同期受信
-  // 改行コードまで
+  // 改行まで
   // callbackでdata_received関数を呼ぶ
   boost::asio::async_read_until(*serial_port_ptr, response_data, "\n", boost::bind(&VSidoBirateral::data_received, this, boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred));
 
@@ -346,7 +309,6 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
 {
   if (bytes_transferred > 0)
   {
-
     std::string buf_str;
     std::istream is(&response_data);
     is >> buf_str;
@@ -360,6 +322,7 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
       bool cast_success = true;
       std::vector<int16_t> int_vec;
       //tokenizerでデータ分割
+      //","で分割
       boost::tokenizer<boost::char_separator<char>> tokens(buf_str, boost::char_separator<char>(",", "\n"));
 
       for (auto item : tokens)
@@ -410,12 +373,14 @@ bool VSidoBirateral::master_srv_torque_enable(interbotix_xs_msgs::TorqueEnable::
 
   if (req.cmd_type == "single" && req.name == "gripper" && req.enable == false)
   {
+    //torque offを受信1回目
     if(once_flag==false){
     sendSerialCmd('3');
     once_flag=true;
     return true;
     }
     else {
+    //birateral startした直後の受信は無視      
       once_flag=false;
     return true;      
     }
@@ -448,13 +413,13 @@ bool VSidoBirateral::master_get_motor_configs(void)
   }
   catch (YAML::BadFile &error)
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
-    ROS_FATAL("[xs_sdk] YAML Error: '%s'", error.what());
+    ROS_FATAL(" Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL(" YAML Error: '%s'", error.what());
     return false;
   }
   if (motor_configs.IsNull())
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL(" Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
     return false;
   }
 
@@ -462,16 +427,16 @@ bool VSidoBirateral::master_get_motor_configs(void)
   try
   {
     mode_configs = YAML::LoadFile(mode_configs_file.c_str());
-    ROS_INFO("[xs_sdk] Loaded mode configs from '%s'.", mode_configs_file.c_str());
+    ROS_INFO(" Loaded mode configs from '%s'.", mode_configs_file.c_str());
   }
   catch (YAML::BadFile &error)
   {
-    ROS_ERROR("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
-    ROS_ERROR("[xs_sdk] YAML Error: '%s'", error.what());
+    ROS_ERROR(" Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
+    ROS_ERROR(" YAML Error: '%s'", error.what());
     return false;
   }
   if (mode_configs.IsNull())
-    ROS_INFO("[xs_sdk] Mode Config file is empty. Will use defaults.");
+    ROS_INFO(" Mode Config file is empty. Will use defaults.");
 
 /*
   port = motor_configs["port"].as<std::string>(PORT);
@@ -517,7 +482,7 @@ bool VSidoBirateral::master_get_motor_configs(void)
   if (joint_order.size() != sleep_positions.size())
   {
     ROS_FATAL(
-      "[xs_sdk] Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
+      " Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
       joint_order.size(), sleep_positions.size());
     return false;
   }
@@ -630,13 +595,13 @@ bool VSidoBirateral::puppet_get_motor_configs(void)
   }
   catch (YAML::BadFile &error)
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
-    ROS_FATAL("[xs_sdk] YAML Error: '%s'", error.what());
+    ROS_FATAL(" Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL(" YAML Error: '%s'", error.what());
     return false;
   }
   if (motor_configs.IsNull())
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL(" Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
     return false;
   }
 
@@ -644,16 +609,16 @@ bool VSidoBirateral::puppet_get_motor_configs(void)
   try
   {
     mode_configs = YAML::LoadFile(mode_configs_file.c_str());
-    ROS_INFO("[xs_sdk] Loaded mode configs from '%s'.", mode_configs_file.c_str());
+    ROS_INFO(" Loaded mode configs from '%s'.", mode_configs_file.c_str());
   }
   catch (YAML::BadFile &error)
   {
-    ROS_ERROR("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
-    ROS_ERROR("[xs_sdk] YAML Error: '%s'", error.what());
+    ROS_ERROR(" Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
+    ROS_ERROR(" YAML Error: '%s'", error.what());
     return false;
   }
   if (mode_configs.IsNull())
-    ROS_INFO("[xs_sdk] Mode Config file is empty. Will use defaults.");
+    ROS_INFO(" Mode Config file is empty. Will use defaults.");
 
 /*
   port = motor_configs["port"].as<std::string>(PORT);
@@ -699,7 +664,7 @@ bool VSidoBirateral::puppet_get_motor_configs(void)
   if (joint_order.size() != sleep_positions.size())
   {
     ROS_FATAL(
-      "[xs_sdk] Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
+      " Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
       joint_order.size(), sleep_positions.size());
     return false;
   }
