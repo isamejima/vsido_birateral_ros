@@ -209,12 +209,13 @@ void VSidoBirateral::publish_joint_states()
     master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0
   }
 
+  //取得するのはpuppetの角度なので、masterのgripperの角度に変換
+  //下記、mobile alohaエンドエフェクタ向けパラメータ
   float MASTER_GRIPPER_JOINT_OPEN = -0.8;
   float MASTER_GRIPPER_JOINT_CLOSE = -1.65;
   float PUPPET_GRIPPER_JOINT_OPEN = 1.4910;
   float PUPPET_GRIPPER_JOINT_CLOSE = -0.6213;
-  //gripperの角度を変換
-  float raw_pos=master_joint_state_msg.position.back();
+  float raw_pos=master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"]);
   float conv_pos=(raw_pos - PUPPET_GRIPPER_JOINT_CLOSE) / (PUPPET_GRIPPER_JOINT_OPEN - PUPPET_GRIPPER_JOINT_CLOSE) * (MASTER_GRIPPER_JOINT_OPEN - MASTER_GRIPPER_JOINT_CLOSE) + MASTER_GRIPPER_JOINT_CLOSE;
   master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"])=conv_pos;
   ROS_INFO_STREAM("raw:"<<raw_pos<<",conv:"<<conv_pos);

@@ -71,7 +71,7 @@ include_directories(
 ## Specify libraries to link a library or executable target against
 ## Add cmake target dependencies of the executable
 add_executable(serial_node src/serial_node.cpp)
-target_link_libraries(serial_node ${catkin_LIBRARIES})
+target_link_libraries(serial_node ${catkin_LIBRARIES} yaml-cpp)
 
 add_executable(vsido_birateral_node src/vsido_birateral_node.cpp src/vsido_birateral.cpp)
 target_link_libraries(vsido_birateral_node ${catkin_LIBRARIES})
