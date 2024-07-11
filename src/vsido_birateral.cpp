@@ -218,7 +218,7 @@ void VSidoBirateral::publish_joint_states()
   float raw_pos=master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"]);
   float conv_pos=(raw_pos - PUPPET_GRIPPER_JOINT_CLOSE) / (PUPPET_GRIPPER_JOINT_OPEN - PUPPET_GRIPPER_JOINT_CLOSE) * (MASTER_GRIPPER_JOINT_OPEN - MASTER_GRIPPER_JOINT_CLOSE) + MASTER_GRIPPER_JOINT_CLOSE;
   master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"])=conv_pos;
-  ROS_INFO_STREAM("raw:"<<raw_pos<<",conv:"<<conv_pos);
+  //ROS_INFO_STREAM("raw:"<<raw_pos<<",conv:"<<conv_pos);
 
   //gripper length
   for (auto const& name : master_yaml_configs.gripper_order)
@@ -329,7 +329,7 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
     {
       // stoiで処理失敗するので、改行を消す
       buf_str.erase(std::remove(buf_str.begin(), buf_str.end(), '\n'), buf_str.end());
-      ROS_INFO_STREAM("buf_str:" << buf_str);
+      //ROS_INFO_STREAM("buf_str:" << buf_str);
 
       bool cast_success = true;
       std::vector<int16_t> int_vec;
