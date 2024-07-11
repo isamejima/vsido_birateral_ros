@@ -30,6 +30,7 @@ VSidoBirateral::VSidoBirateral(ros::NodeHandle *node_handle, boost::asio::io_ser
 
   //  robot_wait_for_joint_states();
   ROS_INFO("V-Sido Birateral node is up!");
+  success=true;
 }
 
 /// @brief Destructor for the VSidoBirateral
