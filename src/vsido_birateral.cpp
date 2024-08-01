@@ -301,13 +301,16 @@ void VSidoBirateral::publish_joint_states2()
     float velocity = 0;
     float effort = 0;
 
-    int vel_index=master_yaml_configs.js_index_map[name]*3+0;
-    int eff_index=master_yaml_configs.js_index_map[name]*3+1;    
+    ROS_INFO_STREAM("name:"<<name);
+    int eff_index=master_yaml_configs.js_index_map[name]*3+0;    
+    int vel_index=master_yaml_configs.js_index_map[name]*3+1;
     int pos_index=master_yaml_configs.js_index_map[name]*3+2;
-    position = robot_convert_angular_position_to_radius(data_vec.at(pos_index));
-    velocity = robot_convert_angular_position_to_radius(data_vec.at(vel_index));
-    effort = robot_convert_load(eff_index);
-    
+    ROS_INFO_STREAM("eff_index:"<<eff_index<<",vel_index:"<<vel_index<<",pos_index:"<<pos_index);
+    effort = robot_convert_load(data_vec.at(eff_index));
+    velocity = robot_convert_angular_position_to_radius(data_vec.at(vel_index));//convert 0.1[deg/sec]/unit to 1.0[deg/sec]
+    position = robot_convert_angular_position_to_radius(data_vec.at(pos_index));//convert 0.1[deg]/unit to 1.0[deg]
+    ROS_INFO_STREAM("data_vec:"<<data_vec.at(eff_index)<<","<<data_vec.at(vel_index)<<","<<data_vec.at(pos_index));    
+    ROS_INFO_STREAM("effort:"<<effort<<",velocity:"<<velocity<<",position:"<<position);    
     master_joint_state_msg.position.push_back(position);
     master_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0
     master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0
@@ -347,12 +350,13 @@ void VSidoBirateral::publish_joint_states2()
     float velocity = 0;
     float effort = 0;
 
-    int vel_index=master_yaml_configs.js_index_map[name]*3+0;
-    int eff_index=master_yaml_configs.js_index_map[name]*3+1;    
+    int eff_index=master_yaml_configs.js_index_map[name]*3+0;    
+    int vel_index=master_yaml_configs.js_index_map[name]*3+1;
     int pos_index=master_yaml_configs.js_index_map[name]*3+2;
+
     position = robot_convert_angular_position_to_radius(data_vec.at(pos_index));//convert 0.1[deg]/unit to 1.0[deg]
     velocity = robot_convert_angular_position_to_radius(data_vec.at(vel_index));//convert 0.1[deg/sec]/unit to 1.0[deg/sec]
-    effort = robot_convert_load(eff_index);
+    effort = robot_convert_load(data_vec.at(eff_index));
 
     puppet_joint_state_msg.position.push_back(position);
     puppet_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0埋め
@@ -439,13 +443,13 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
     {
       // stoiで処理失敗するので、改行を消す
       buf_str.erase(std::remove(buf_str.begin(), buf_str.end(), '\n'), buf_str.end());
-      //ROS_INFO_STREAM("buf_str:" << buf_str);
+      ROS_INFO_STREAM("buf_str:" << buf_str);
 
       bool cast_success = true;
       std::vector<int16_t> int_vec;
       //tokenizerでデータ分割
-      //","," "(半角スペース),"\n"で分割
-      boost::tokenizer<boost::char_separator<char>> tokens(buf_str, boost::char_separator<char>(",", " "));
+      //",",,"\n"で分割
+      boost::tokenizer<boost::char_separator<char>> tokens(buf_str, boost::char_separator<char>(","));
 
       for (auto item : tokens)
       {

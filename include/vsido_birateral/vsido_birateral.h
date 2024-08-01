@@ -187,13 +187,19 @@ private:
 
   float robot_convert_load(int const &value)
   {
-   float load = 0;
-   const float LOAD_UNIT = 0.1f; 
-   if (value == 1023 || value == 0) load = 0.0f;
-   else if (value > 0 && value < 1023) load = value * LOAD_UNIT;
-   else if (value > 1023 && value < 2048) load = (value - 1023) * LOAD_UNIT * (-1.0f);
- 
+       float load = 0;
+   const float CURRENT_UNIT = 2.69f;// 2.69mA per unit
+   load = (float)(value * CURRENT_UNIT);
    return load;
+    /*
+   float load = 0;
+   const float LOAD_UNIT = 0.1f;
+   if (value == 1023 || value == 0) load = 0.0f;
+   else {
+    load = (float)(value * LOAD_UNIT);
+   } 
+   return load;
+   */
   };
 
   float robot_convert_angular_position_to_radius(int const &int_angular_position)
