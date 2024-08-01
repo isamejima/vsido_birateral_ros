@@ -65,6 +65,7 @@ bool VSidoBirateral::init_model(void)
 
   //position_vecをリサイズし、ゼロで初期化
   position_vec.resize(master_yaml_configs.group_map["all"].joint_names.size(), 0);
+  data_vec.resize(master_yaml_configs.group_map["all"].joint_names.size()*3, 0);
 
   return true;
 }
@@ -271,6 +272,114 @@ void VSidoBirateral::publish_joint_states()
   pub_puppet_joint_states.publish(puppet_joint_state_msg);
 }
 
+/// @brief publishes to the joint_states topic
+void VSidoBirateral::publish_joint_states2()
+{
+  std::vector<int16_t> d_vec;
+  bool flag = false;
+  {
+    std::lock_guard<std::mutex> lock(position_vec_mutex); // 念の為ロックする
+    d_vec = data_vec;
+    flag = once_received_flag;
+  }
+
+  // 一度でもシリアル受信できていないならreturn
+  if (flag == false)
+  {
+    return;
+  }
+
+  sensor_msgs::JointState master_joint_state_msg;
+  sensor_msgs::JointState puppet_joint_state_msg;  
+
+  //masterまわり
+  master_joint_state_msg.name = master_yaml_configs.group_map["all"].joint_names;  
+  //arm
+  for (auto const& name : master_yaml_configs.group_map["all"].joint_names)
+  {
+    float position = 0;
+    float velocity = 0;
+    float effort = 0;
+
+    int vel_index=master_yaml_configs.js_index_map[name]*3+0;
+    int eff_index=master_yaml_configs.js_index_map[name]*3+1;    
+    int pos_index=master_yaml_configs.js_index_map[name]*3+2;
+    position = robot_convert_angular_position_to_radius(data_vec.at(pos_index));
+    velocity = robot_convert_angular_position_to_radius(data_vec.at(vel_index));
+    effort = robot_convert_load(eff_index);
+    
+    master_joint_state_msg.position.push_back(position);
+    master_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0
+    master_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0
+  }
+
+  //取得するのはpuppetの角度なので、masterのgripperの角度に変換
+  //下記、mobile alohaエンドエフェクタ向けパラメータ
+  float MASTER_GRIPPER_JOINT_OPEN = -0.8;
+  float MASTER_GRIPPER_JOINT_CLOSE = -1.65;
+  float PUPPET_GRIPPER_JOINT_OPEN = 1.4910;
+  float PUPPET_GRIPPER_JOINT_CLOSE = -0.6213;
+  float raw_pos=master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"]);
+  float conv_pos=(raw_pos - PUPPET_GRIPPER_JOINT_CLOSE) / (PUPPET_GRIPPER_JOINT_OPEN - PUPPET_GRIPPER_JOINT_CLOSE) * (MASTER_GRIPPER_JOINT_OPEN - MASTER_GRIPPER_JOINT_CLOSE) + MASTER_GRIPPER_JOINT_CLOSE;
+  master_joint_state_msg.position.at(master_yaml_configs.js_index_map["gripper"])=conv_pos;
+  //ROS_INFO_STREAM("raw:"<<raw_pos<<",conv:"<<conv_pos);
+
+  //gripper length
+  for (auto const& name : master_yaml_configs.gripper_order)
+  {
+    master_joint_state_msg.name.push_back(master_yaml_configs.gripper_map[name].left_finger.c_str());
+    master_joint_state_msg.name.push_back(master_yaml_configs.gripper_map[name].right_finger.c_str());
+    float pos = robot_convert_angular_position_to_linear(master_yaml_configs.gripper_map[name], master_joint_state_msg.position.at(master_yaml_configs.gripper_map[name].js_index));
+    master_joint_state_msg.position.push_back(pos);
+    master_joint_state_msg.position.push_back(-pos);
+    master_joint_state_msg.velocity.push_back(0);
+    master_joint_state_msg.velocity.push_back(0);
+    master_joint_state_msg.effort.push_back(0);
+    master_joint_state_msg.effort.push_back(0);
+  }
+
+  //puppetまわり
+  puppet_joint_state_msg.name = puppet_yaml_configs.group_map["all"].joint_names;  
+  //arm
+  for (auto const& name : master_yaml_configs.group_map["all"].joint_names)
+  {
+    float position = 0;
+    float velocity = 0;
+    float effort = 0;
+
+    int vel_index=master_yaml_configs.js_index_map[name]*3+0;
+    int eff_index=master_yaml_configs.js_index_map[name]*3+1;    
+    int pos_index=master_yaml_configs.js_index_map[name]*3+2;
+    position = robot_convert_angular_position_to_radius(data_vec.at(pos_index));//convert 0.1[deg]/unit to 1.0[deg]
+    velocity = robot_convert_angular_position_to_radius(data_vec.at(vel_index));//convert 0.1[deg/sec]/unit to 1.0[deg/sec]
+    effort = robot_convert_load(eff_index);
+
+    puppet_joint_state_msg.position.push_back(position);
+    puppet_joint_state_msg.velocity.push_back(velocity); // 速度は使っていないので0埋め
+    puppet_joint_state_msg.effort.push_back(effort);   // 電流はつかっていないので0埋め
+  }
+
+  for (auto const& name : puppet_yaml_configs.gripper_order)
+  {
+    puppet_joint_state_msg.name.push_back(puppet_yaml_configs.gripper_map[name].left_finger.c_str());
+    puppet_joint_state_msg.name.push_back(puppet_yaml_configs.gripper_map[name].right_finger.c_str());
+    float pos = robot_convert_angular_position_to_linear(puppet_yaml_configs.gripper_map[name], puppet_joint_state_msg.position.at(puppet_yaml_configs.gripper_map[name].js_index));
+    puppet_joint_state_msg.position.push_back(pos);
+    puppet_joint_state_msg.position.push_back(-pos);
+    puppet_joint_state_msg.velocity.push_back(0);
+    puppet_joint_state_msg.velocity.push_back(0);
+    puppet_joint_state_msg.effort.push_back(0);
+    puppet_joint_state_msg.effort.push_back(0);
+  }
+
+  ros::Time current_time = ros::Time::now();
+  master_joint_state_msg.header.stamp = current_time;
+  puppet_joint_state_msg.header.stamp = current_time;
+
+  pub_master_joint_states.publish(master_joint_state_msg);
+  pub_puppet_joint_states.publish(puppet_joint_state_msg);
+}
+
 /// @brief Waits until first JointState message is received
 bool VSidoBirateral::sendSerialCmd(unsigned char ch)
 {
@@ -335,8 +444,8 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
       bool cast_success = true;
       std::vector<int16_t> int_vec;
       //tokenizerでデータ分割
-      //","で分割
-      boost::tokenizer<boost::char_separator<char>> tokens(buf_str, boost::char_separator<char>(",", "\n"));
+      //","," "(半角スペース),"\n"で分割
+      boost::tokenizer<boost::char_separator<char>> tokens(buf_str, boost::char_separator<char>(",", " "));
 
       for (auto item : tokens)
       {
@@ -365,6 +474,19 @@ void VSidoBirateral::data_received(const boost::system::error_code &error, size_
           }        
         }
         publish_joint_states();
+      }
+      else if(cast_success == true && int_vec.size() == data_vec.size()+1)
+      {
+        {
+          std::lock_guard<std::mutex> lock(position_vec_mutex); //念のためロックする
+          once_received_flag = true;
+          diff_time=int_vec.at(0);
+          for (int i = 0; i < data_vec.size(); i++)
+          {
+            data_vec.at(i) = int_vec.at(i + 1);
+          }        
+        }
+        publish_joint_states2();        
       }
       else
       {

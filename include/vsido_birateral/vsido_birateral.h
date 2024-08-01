@@ -146,6 +146,7 @@ private:
 
   int16_t diff_time;
   std::vector<int16_t> position_vec;
+  std::vector<int16_t> data_vec;
   std::mutex position_vec_mutex;
 
   boost::asio::io_service &io;
@@ -178,10 +179,22 @@ private:
   void init_timers(void);
 
   void publish_joint_states(void);
+  void publish_joint_states2(void);  
 
   /// @brief ROS Timer that reads current states from all the motors and publishes them to the joint_states topic
   /// @param e - TimerEvent message
   void robot_update_joint_states(const ros::TimerEvent &e);
+
+  float robot_convert_load(int const &value)
+  {
+   float load = 0;
+   const float LOAD_UNIT = 0.1f; 
+   if (value == 1023 || value == 0) load = 0.0f;
+   else if (value > 0 && value < 1023) load = value * LOAD_UNIT;
+   else if (value > 1023 && value < 2048) load = (value - 1023) * LOAD_UNIT * (-1.0f);
+ 
+   return load;
+  };
 
   float robot_convert_angular_position_to_radius(int const &int_angular_position)
   {
